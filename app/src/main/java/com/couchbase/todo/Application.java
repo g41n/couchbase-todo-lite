@@ -1,8 +1,13 @@
 package com.couchbase.todo;
 
+import android.content.Context;
 import android.content.Intent;
+import android.net.nsd.NsdManager;
+import android.net.nsd.NsdServiceInfo;
 import android.os.Handler;
 import android.os.StrictMode;
+import android.provider.Settings;
+import android.provider.Settings.System;
 import android.util.Log;
 import android.widget.Toast;
 
@@ -23,6 +28,8 @@ import com.couchbase.lite.UnsavedRevision;
 import com.couchbase.lite.android.AndroidContext;
 import com.couchbase.lite.auth.Authenticator;
 import com.couchbase.lite.auth.AuthenticatorFactory;
+import com.couchbase.lite.listener.Credentials;
+import com.couchbase.lite.listener.LiteListener;
 import com.couchbase.lite.replicator.Replication;
 import com.couchbase.lite.util.ZipUtils;
 import com.facebook.stetho.Stetho;
@@ -45,11 +52,14 @@ public class Application extends android.app.Application {
 
     private Boolean mLoginFlowEnabled = false;
     private Boolean mEncryptionEnabled = false;
-    private Boolean mSyncEnabled = false;
-    private String mSyncGatewayUrl = "http://10.0.2.2:4984/todo/";
+    public Boolean mSyncEnabled = false;
+    //private String mSyncGatewayUrl = "http://10.0.2.2:4984/todo/";
+    //private String mSyncGatewayUrl = "http://192.168.1.150:4984/db/";
+    public String mSyncGatewayUrl = "http://192.168.1.172:5555/db/";
     private Boolean mLoggingEnabled = false;
     private Boolean mUsePrebuiltDb = false;
-    private Boolean mConflictResolution = false;
+    private Boolean mConflictResolution = true;
+    private Boolean mLiteListenerEnabled = true;
 
     public Database getDatabase() {
         return database;
@@ -57,9 +67,14 @@ public class Application extends android.app.Application {
 
     private Manager manager;
     private Database database;
-    private Replication pusher;
-    private Replication puller;
+    protected Replication pusher;
+    protected Replication puller;
     private ArrayList<Document> accessDocuments = new ArrayList<Document>();
+    public LiteListener listener;
+    public NsdManager mNsdManager;
+    public String SERVICE_NAME = "Utumana";
+    public String SERVICE_TYPE = "_utumana._tcp";
+    public List<NsdServiceInfo> services = new ArrayList<>();
 
     private String mUsername;
 
@@ -81,7 +96,7 @@ public class Application extends android.app.Application {
         if (mLoginFlowEnabled) {
             login();
         } else {
-            startSession("todo", null, null);
+            startSession("db", null, null);
         }
 
         try {
@@ -89,6 +104,11 @@ public class Application extends android.app.Application {
         } catch (IOException e) {
             e.printStackTrace();
         }
+
+        mNsdManager = (NsdManager) getSystemService(Context.NSD_SERVICE);
+
+        // Service name "personalization"
+        SERVICE_NAME += " " + System.getString(this.getContentResolver(), Settings.Secure.ANDROID_ID);
     }
 
     // Logging
@@ -110,9 +130,10 @@ public class Application extends android.app.Application {
         installPrebuiltDb();
         openDatabase(username, password, newPassword);
         mUsername = username;
-        startReplication(username, password);
+        startReplication(username, password, true);
         showApp();
         startConflictLiveQuery();
+        //startLiteListener();
     }
 
     private void installPrebuiltDb() {
@@ -126,7 +147,7 @@ public class Application extends android.app.Application {
             e.printStackTrace();
         }
         try {
-            database = manager.getExistingDatabase("todo");
+            database = manager.getExistingDatabase("db");
         } catch (CouchbaseLiteException e) {
             e.printStackTrace();
         }
@@ -259,7 +280,7 @@ public class Application extends android.app.Application {
     }
 
     // Replication
-    private void startReplication(String username, String password) {
+    public void startReplication(String username, String password, Boolean pushEnabled) {
         if (!mSyncEnabled) {
             return;
         }
@@ -273,9 +294,11 @@ public class Application extends android.app.Application {
 
         ReplicationChangeListener changeListener = new ReplicationChangeListener(this);
 
-        pusher = database.createPushReplication(url);
-        pusher.setContinuous(true); // Runs forever in the background
-        pusher.addChangeListener(changeListener);
+        if (pushEnabled) {
+            pusher = database.createPushReplication(url);
+            pusher.setContinuous(true); // Runs forever in the background
+            pusher.addChangeListener(changeListener);
+        }
 
         puller = database.createPullReplication(url);
         puller.setContinuous(true); // Runs forever in the background
@@ -283,21 +306,29 @@ public class Application extends android.app.Application {
 
         if (mLoginFlowEnabled) {
             Authenticator authenticator = AuthenticatorFactory.createBasicAuthenticator(username, password);
-            pusher.setAuthenticator(authenticator);
+            if (pushEnabled) {
+                pusher.setAuthenticator(authenticator);
+            }
             puller.setAuthenticator(authenticator);
         }
 
-        pusher.start();
+        if (pushEnabled) {
+            pusher.start();
+        }
         puller.start();
     }
 
-    private void stopReplication() {
+    public void stopReplication() {
         if (!mSyncEnabled) {
             return;
         }
 
-        pusher.stop();
+        if (pusher != null) {
+            pusher.stop();
+            pusher = null;
+        }
         puller.stop();
+        puller = null;
     }
 
 
@@ -343,6 +374,7 @@ public class Application extends android.app.Application {
     }
 
     private void resolveConflicts(QueryEnumerator rows) {
+        android.util.Log.d("dev", " *** chiamata a resolveConflicts *** ");
         for (QueryRow row : rows) {
             List<SavedRevision> revs = row.getConflictingRevisions();
             if (revs.size() > 1) {
@@ -504,4 +536,172 @@ public class Application extends android.app.Application {
         return commonParent;
     }
 
+    protected void startLiteListener() {
+        if (!mLiteListenerEnabled && listener == null) {
+            return;
+        }
+
+        Manager manager = null;
+        try {
+            manager = new Manager(new AndroidContext(getApplicationContext()), Manager.DEFAULT_OPTIONS);
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        //listener = new LiteListener(manager, 5555, null);
+        listener = new LiteListener(manager, 5555, new Credentials("", ""));
+        listener.start();
+        android.util.Log.d("LiteL", "listener started on port " + listener.getListenPort());
+    }
+
+    protected void stopLiteListener() {
+        if (listener != null) {
+            listener.stop();
+            listener = null;
+            android.util.Log.d("LiteL", "listener stopped");
+        }
+    }
+
+    public void startServiceRegistration() {
+        if (listener == null) {
+            android.util.Log.e("LiteL", "service not active (listener = null)");
+        }
+
+        // Registration of the service in the local network
+        NsdServiceInfo serviceInfo = new NsdServiceInfo();
+        serviceInfo.setServiceName(SERVICE_NAME);
+        serviceInfo.setServiceType(SERVICE_TYPE);
+        serviceInfo.setPort(listener.getListenPort());
+
+        try {
+            mNsdManager.registerService(serviceInfo, NsdManager.PROTOCOL_DNS_SD, mNsdRegistrationListener);
+            android.util.Log.d("LiteL", "service registered");
+
+        } catch(Exception e) {
+            e.printStackTrace();
+            android.util.Log.e("LiteL", "service registration exception: " + e);
+        }
+    }
+
+    public void stopServiceRegistration() {
+        mNsdManager.unregisterService(mNsdRegistrationListener);
+    }
+
+    NsdManager.RegistrationListener mNsdRegistrationListener = new NsdManager.RegistrationListener() {
+        private String TAG = "LiteL";
+        @Override
+        public void onRegistrationFailed(NsdServiceInfo nsdServiceInfo, int i) {
+            android.util.Log.d(TAG, "Registration failed: " + nsdServiceInfo.getServiceName());
+        }
+
+        @Override
+        public void onUnregistrationFailed(NsdServiceInfo nsdServiceInfo, int i) {
+            android.util.Log.d(TAG, "Unregistration failed: " + nsdServiceInfo.getServiceName());
+        }
+
+        @Override
+        public void onServiceRegistered(NsdServiceInfo nsdServiceInfo) {
+            android.util.Log.d(TAG, "Registered successfully: " + nsdServiceInfo.getServiceName());
+        }
+
+        @Override
+        public void onServiceUnregistered(NsdServiceInfo nsdServiceInfo) {
+            android.util.Log.d(TAG, "Unregistered successfully: " + nsdServiceInfo.getServiceName());
+        }
+    };
+
+    public void startServiceDiscovery() {
+        mNsdManager.discoverServices(SERVICE_TYPE, NsdManager.PROTOCOL_DNS_SD, mDiscoveryListener);
+    }
+
+    public void stopServiceDiscovery() {
+        mNsdManager.stopServiceDiscovery(mDiscoveryListener);
+    }
+
+    NsdManager.DiscoveryListener mDiscoveryListener = new NsdManager.DiscoveryListener() {
+
+        private String TAG = "NSD";
+
+        // Called as soon as service discovery begins.
+        @Override
+        public void onDiscoveryStarted(String regType) {
+            android.util.Log.d(TAG, "Service discovery started");
+        }
+
+        @Override
+        public void onServiceFound(NsdServiceInfo service) {
+            // A service was found! Do something with it.
+            android.util.Log.d(TAG, "Service discovery success : " + service);
+
+            if (!service.getServiceType().equals(SERVICE_TYPE)) {
+                // Service type is the string containing the protocol and
+                // transport layer for this service.
+                android.util.Log.d(TAG, "Unknown Service Type: _" + service.getServiceType() + "_");
+                android.util.Log.d(TAG, "Service name: " + service.getServiceName());
+                android.util.Log.d(TAG, "Service host: " + service.getHost());
+                android.util.Log.d(TAG, "Service port: " + service.getPort());
+
+            } else if (service.getServiceName().contains(SERVICE_NAME)) {
+//            } else if (service.getServiceName().equals(SERVICE_NAME)) {
+                // The name of the service tells the user what they'd be
+                // connecting to. It could be "Bob's Chat App".
+                android.util.Log.d(TAG, "Same machine: " + SERVICE_NAME);
+                android.util.Log.d(TAG, "Service name: " + service.getServiceName());
+                android.util.Log.d(TAG, "Service host: " + service.getHost());
+                android.util.Log.d(TAG, "Service port: " + service.getPort());
+
+            } else {
+                android.util.Log.d(TAG, "Diff Machine : " + service.getServiceName());
+                android.util.Log.d(TAG, "Service name: " + service.getServiceName());
+                android.util.Log.d(TAG, "Service host: " + service.getHost());
+                android.util.Log.d(TAG, "Service port: " + service.getPort());
+            }
+
+            // connect to the service and obtain serviceInfo
+            try {
+                mNsdManager.resolveService(service, new NsdManager.ResolveListener() {
+                    @Override
+                    public void onResolveFailed(NsdServiceInfo nsdServiceInfo, int i) {
+
+                    }
+
+                    @Override
+                    public void onServiceResolved(NsdServiceInfo nsdServiceInfo) {
+                        android.util.Log.d(TAG, "Service resolved!");
+                        android.util.Log.d(TAG, "Service name: " + nsdServiceInfo.getServiceName());
+                        android.util.Log.d(TAG, "Service host: " + nsdServiceInfo.getHost());
+                        android.util.Log.d(TAG, "Service port: " + nsdServiceInfo.getPort());
+
+                        services.add(nsdServiceInfo);
+                        android.util.Log.d("aaa", "size: " + services.size());
+                    }
+                });
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+        }
+
+        @Override
+        public void onServiceLost(NsdServiceInfo service) {
+            // When the network service is no longer available.
+            // Internal bookkeeping code goes here.
+            android.util.Log.e(TAG, "service lost" + service);
+        }
+
+        @Override
+        public void onDiscoveryStopped(String serviceType) {
+            android.util.Log.i(TAG, "Discovery stopped: " + serviceType);
+        }
+
+        @Override
+        public void onStartDiscoveryFailed(String serviceType, int errorCode) {
+            android.util.Log.e(TAG, "Discovery failed: Error code:" + errorCode);
+            mNsdManager.stopServiceDiscovery(this);
+        }
+
+        @Override
+        public void onStopDiscoveryFailed(String serviceType, int errorCode) {
+            android.util.Log.e(TAG, "Discovery failed: Error code:" + errorCode);
+            mNsdManager.stopServiceDiscovery(this);
+        }
+    };
 }

@@ -33,6 +33,7 @@ import com.couchbase.lite.SavedRevision;
 import com.couchbase.lite.UnsavedRevision;
 import com.couchbase.lite.util.Log;
 import com.couchbase.todo.util.LiveQueryAdapter;
+import com.fasterxml.jackson.databind.deser.std.NumberDeserializers;
 
 import java.util.HashMap;
 import java.util.List;
@@ -84,6 +85,23 @@ public class ListsActivity extends AppCompatActivity {
             public boolean onLongClick(View v) {
                 createListConflict();
                 return true;
+            }
+        });
+
+        FloatingActionButton settingsButton = (FloatingActionButton) findViewById(R.id.settingsButton);
+        settingsButton.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                showSettings();
+            }
+        });
+
+        FloatingActionButton refreshButton = (FloatingActionButton) findViewById(R.id.refreshButton);
+        refreshButton.setOnClickListener(new AdapterView.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                setupViewAndQuery();
+                mAdapter.notifyDataSetChanged();
             }
         });
 
@@ -249,6 +267,12 @@ public class ListsActivity extends AppCompatActivity {
         startActivity(intent);
     }
 
+    private void showSettings() {
+        Intent intent = new Intent(this, SettingsActivity.class);
+        //intent.putExtra(ListDetailActivity.INTENT_LIST_ID, list.getId());
+        startActivity(intent);
+    }
+
     private class ListAdapter extends LiveQueryAdapter {
         public ListAdapter(Context context, LiveQuery query) {
             super(context, query);
@@ -386,3 +410,5 @@ public class ListsActivity extends AppCompatActivity {
     }
 
 }
+
+

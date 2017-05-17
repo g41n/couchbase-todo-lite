@@ -43,5 +43,28 @@
         android:layout_margin="@dimen/fab_margin"
         app:srcCompat="@drawable/ic_add_white" />
 
+    <android.support.design.widget.FloatingActionButton
+        android:id="@+id/settingsButton"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|end"
+        android:layout_marginBottom="16dp"
+        android:layout_marginRight="88dp"
+
+
+        app:srcCompat="@android:drawable/ic_menu_manage"
+        />
+
+    <android.support.design.widget.FloatingActionButton
+        android:id="@+id/refreshButton"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|end"
+        android:layout_marginBottom="16dp"
+        android:layout_marginRight="160dp"
+
+
+        app:srcCompat="@android:drawable/stat_notify_sync_noanim" />
+
 
 </android.support.design.widget.CoordinatorLayout>
